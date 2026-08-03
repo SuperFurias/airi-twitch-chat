@@ -50,6 +50,11 @@
   .dot { width: 8px; height: 8px; border-radius: 50%; background: #666; flex: none; }
   .dot.ok { background: #2dd36f; }
   .dot.bad { background: #ff5d5d; }
+  .warnbanner {
+    margin-top: 10px; padding: 9px 11px; border-radius: 8px;
+    background: #3a2b12; border: 1px solid #8a5a1a;
+    color: #ffd28a; font-size: 12px; line-height: 1.5;
+  }
   .meta { font-size: 11px; color: #8a8a96; margin-top: 6px; line-height: 1.5; }
   .error { color: #ff9d9d; font-size: 12px; margin-top: 10px; min-height: 16px; }
   .saved { color: #7ee2a8; font-size: 12px; margin-top: 10px; min-height: 16px; }
@@ -63,6 +68,7 @@
   .chatlog .entry { margin-bottom: 6px; word-break: break-word; }
   .chatlog .entry .who { font-weight: 700; color: #a78bfa; }
   .chatlog .entry.reply .who { color: #2dd36f; }
+  .chatlog .entry.warn .who { color: #ffb86c; }
   .chatlog .entry .when { color: #5c5c68; font-size: 10px; margin-left: 6px; }
   .chatlog .log-empty { color: #5c5c68; }
 </style>
@@ -76,13 +82,18 @@
     <span id="statusText">Loading…</span>
   </div>
 
+  <div class="warnbanner" id="warn" hidden>
+    ⚠️ AIRI didn't respond to the last chat messages. Make sure a model is
+    selected in AIRI (Settings → character model), then send a new message.
+  </div>
+
   <label for="username">Twitch username</label>
   <input id="username" autocomplete="off" spellcheck="false" placeholder="your_twitch_username">
   <div class="hint">The account that sends chat messages.</div>
 
   <label for="oauth">Chat token (oauth:…)</label>
   <input id="oauth" type="password" autocomplete="off" spellcheck="false" placeholder="oauth:…">
-  <div class="hint" id="oauthHint">Get one at twitchtokengenerator.com (scopes: chat:read, chat:write).</div>
+  <div class="hint" id="oauthHint">Get one at twitchtokengenerator.com (scopes: chat:edit, chat:read, user:read:chat).</div>
 
   <label for="channels">Channels</label>
   <input id="channels" autocomplete="off" spellcheck="false" placeholder="#channel1, #channel2">
@@ -146,6 +157,7 @@
         }
         if (data.lastError) meta.push('last error: ' + data.lastError)
         el('meta').textContent = meta.join(' · ')
+        el('warn').hidden = !data.modelWarning
       })
       .catch(function () { setStatus('offline') })
   }
@@ -162,7 +174,7 @@
         el('oauth').placeholder = oauthSet ? 'already set — leave empty to keep' : 'oauth:…'
         el('oauthHint').textContent = oauthSet
           ? 'A token is already saved. Enter a new one to replace it.'
-          : 'Get one at twitchtokengenerator.com (scopes: chat:read, chat:write).'
+          : 'Get one at twitchtokengenerator.com (scopes: chat:edit, chat:read, user:read:chat).'
       })
   }
 
@@ -186,8 +198,8 @@
           var e = entries[i]
           var when = new Date(e.at)
           var time = when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-          html += '<div class="entry' + (e.kind === 'reply' ? ' reply' : '') + '">'
-            + '<span class="who">' + (e.kind === 'reply' ? 'AIRI →' : escapeHtml(e.user)) + '</span>'
+          html += '<div class="entry' + (e.kind === 'reply' ? ' reply' : '') + (e.kind === 'warn' ? ' warn' : '') + '">'
+            + '<span class="who">' + (e.kind === 'reply' ? 'AIRI →' : e.kind === 'warn' ? '⚠️ AIRI' : escapeHtml(e.user)) + '</span>'
             + '<span class="when">' + time + '</span><br>'
             + escapeHtml(e.text)
             + '</div>'

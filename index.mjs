@@ -30,6 +30,7 @@ const MAX_BUFFERED_MESSAGES = 100
 const MIN_SEND_INTERVAL_MS = 1_600
 const MAX_RECONNECT_DELAY_MS = 60_000
 const MAX_MESSAGE_LENGTH = 500
+const MODEL_RESPONSE_WINDOW_MS = 45_000
 
 /**
  * Local kit references for `ctx.kits.use(...)`.
@@ -132,6 +133,9 @@ function createTwitchState() {
     ingestTargets: [],
     chatLog: [],
     config: undefined,
+    lastOutputAt: 0,
+    modelWarning: false,
+    modelWarningTimer: undefined,
   }
 }
 
@@ -249,6 +253,8 @@ function buildStatusPayload(state, config) {
     connectedAt: state.connectedAt,
     autoReply: config?.autoReply !== false,
     bridge: state.bridgeReady,
+    modelWarning: state.modelWarning,
+    lastOutputAt: state.lastOutputAt,
   }
 }
 
@@ -611,7 +617,13 @@ function handleBridgeMessage(state, message) {
     return
   }
 
+  if (message.type === 'output:gen-ai:chat:message' && message.data) {
+    noteAirOutput(state)
+    return
+  }
+
   if (message.type === 'output:gen-ai:chat:complete' && message.data) {
+    noteAirOutput(state)
     // Auto-post the character's reply to Twitch when the reply was triggered
     // by a recent Twitch forward. The real reply text lives in
     // `message.data.message.content`; the top-level `text` is the input echo.
@@ -659,6 +671,43 @@ function announceBridge(state) {
   }))
 }
 
+/**
+ * Records any generation output from AIRI and clears the "no model selected"
+ * watchdog. The renderer ingests `input:text` into the character's context,
+ * but only generates (and emits `output:gen-ai:chat:*`) when a provider and a
+ * model are selected — see context-bridge.ts (activeProvider/activeModel
+ * gate). With no model, the message is silently ignored, so the absence of
+ * any output event after a forward is the only observable failure signal.
+ */
+function noteAirOutput(state) {
+  state.lastOutputAt = Date.now()
+  state.modelWarning = false
+  if (state.modelWarningTimer) {
+    clearTimeout(state.modelWarningTimer)
+    state.modelWarningTimer = undefined
+  }
+}
+
+/**
+ * Starts the watchdog that warns when the character never answers a forwarded
+ * Twitch message. The warning points at the model selection because AIRI
+ * silently drops input without an active chat model.
+ */
+function armModelWatchdog(state) {
+  if (state.modelWarningTimer) {
+    clearTimeout(state.modelWarningTimer)
+  }
+  state.modelWarningTimer = setTimeout(() => {
+    state.modelWarningTimer = undefined
+    if (state.lastOutputAt >= state.lastForwardAt) {
+      return
+    }
+    state.modelWarning = true
+    pushToChatLog(state, 'warn', 'AIRI', 'No reply from the character within 45s — check that a model is selected in AIRI (Settings → model)')
+    log('model warning: character produced no output after a forward')
+  }, MODEL_RESPONSE_WINDOW_MS)
+}
+
 function stopChannelBridge(state) {
   if (state.bridgeReconnectTimer) {
     clearTimeout(state.bridgeReconnectTimer)
@@ -673,6 +722,10 @@ function stopChannelBridge(state) {
     state.pendingReplyTimer = undefined
   }
   state.bridgeReady = false
+  if (state.modelWarningTimer) {
+    clearTimeout(state.modelWarningTimer)
+    state.modelWarningTimer = undefined
+  }
   if (state.bridgeWs) {
     const ws = state.bridgeWs
     state.bridgeWs = undefined
@@ -735,6 +788,7 @@ function forwardToCharacter(state, config, entry) {
     }
     state.bridgeWs.send(JSON.stringify(envelope))
     log('forwarded to the character:', text.slice(0, 140))
+    armModelWatchdog(state)
   }
 }
 
@@ -1078,6 +1132,10 @@ export default {
   id: PLUGIN_ID,
   setup,
 }
+
+
+
+
 
 
 
