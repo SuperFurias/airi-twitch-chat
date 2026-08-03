@@ -151,6 +151,11 @@ function pushToBuffer(state, entry) {
   }
 }
 
+function botName(state) {
+  const name = state.config && state.config.username
+  return (typeof name === 'string' && name.trim()) ? name.trim() : 'AIRI'
+}
+
 function pushToChatLog(state, kind, user, text) {
   state.chatLog.push({
     kind,
@@ -265,6 +270,84 @@ function readRequestBody(request) {
     request.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
     request.on('error', reject)
   })
+}
+
+/**
+ * Starts a fresh chat conversation in the AIRI main window.
+ *
+ * The channel protocol has no chat-reset event and the widget iframe is
+ * sandboxed, so the extension drives the renderer through Chrome DevTools
+ * Protocol on the launcher's `--remote-debugging-port=9223`. It creates a new
+ * session for the active card (which also picks up the current system prompt)
+ * and deletes the previous session.
+ *
+ * NOTICE: requires the app to run with the remote debugging port open — the
+ * launcher in `windows-workaround/` (AIRI-official.bat) does this. Without it
+ * the endpoint returns a clear error and the widget shows it.
+ */
+async function clearChatViaCdp() {
+  let targets
+  try {
+    const response = await fetch('http://127.0.0.1:9223/json/list')
+    targets = await response.json()
+  }
+  catch {
+    throw new Error('debug port 9223 unreachable — restart AIRI with the launcher (AIRI-official.bat)')
+  }
+  const target = targets.find(t => t.type === 'page' && t.url.includes('#/'))
+  if (!target) {
+    throw new Error('main window not found on the debug port')
+  }
+  const expression = `(async () => {
+    const app = document.querySelector('#app')?.__vue_app__
+    const pinia = app?.config?.globalProperties?.$pinia
+    const chatSession = pinia?._s?.get('chat-session')
+    const cardStore = pinia?._s?.get('airi-card')
+    if (!chatSession || !cardStore) return { ok: false, error: 'chat store unavailable' }
+    const oldId = chatSession.activeSessionId
+    const newId = await chatSession.createSession(cardStore.activeCardId, { setActive: true })
+    if (oldId && oldId !== newId) {
+      try { await chatSession.deleteSession(oldId) } catch (e) {}
+    }
+    return { ok: true, newSessionId: newId, clearedSession: oldId }
+  })()`
+  const result = await new Promise((resolve, reject) => {
+    const ws = new WebSocket(target.webSocketDebuggerUrl)
+    const timer = setTimeout(() => {
+      try { ws.close() } catch {}
+      reject(new Error('CDP evaluation timed out'))
+    }, 15_000)
+    ws.addEventListener('open', () => {
+      ws.send(JSON.stringify({
+        id: 1,
+        method: 'Runtime.evaluate',
+        params: { expression, awaitPromise: true, returnByValue: true },
+      }))
+    })
+    ws.addEventListener('message', event => {
+      const msg = JSON.parse(String(event.data))
+      if (msg.id !== 1) {
+        return
+      }
+      clearTimeout(timer)
+      try { ws.close() } catch {}
+      const value = msg.result?.result?.value
+      if (msg.result?.exceptionDetails) {
+        reject(new Error('failed to evaluate in the app window'))
+        return
+      }
+      if (value && typeof value === 'object' && value.ok === false) {
+        reject(new Error(value.error || 'failed to clear the chat'))
+        return
+      }
+      resolve(value)
+    })
+    ws.addEventListener('error', () => {
+      clearTimeout(timer)
+      reject(new Error('CDP websocket error'))
+    })
+  })
+  return result
 }
 
 function sendLine(state, line) {
@@ -649,7 +732,7 @@ function handleBridgeMessage(state, message) {
         if (channel && state.connected && Date.now() - state.lastAutoSendAt > 12_000) {
           state.lastAutoSendAt = Date.now()
           enqueueSend(state, channel, state.pendingReplyText)
-          pushToChatLog(state, 'reply', 'AIRI', state.pendingReplyText)
+          pushToChatLog(state, 'reply', botName(state), state.pendingReplyText)
           log('auto-posted reply to', channel)
         }
       }, 5_000)
@@ -703,7 +786,7 @@ function armModelWatchdog(state) {
       return
     }
     state.modelWarning = true
-    pushToChatLog(state, 'warn', 'AIRI', 'No reply from the character within 45s — check that a model is selected in AIRI (Settings → model)')
+    pushToChatLog(state, 'warn', botName(state), 'No reply from the character within 45s — check that a model is selected in AIRI (Settings → model)')
     log('model warning: character produced no output after a forward')
   }, MODEL_RESPONSE_WINDOW_MS)
 }
@@ -834,7 +917,7 @@ async function startConfigServer(state, configPath, rootDir, getConfig) {
 
       if (request.method === 'GET' && pathname === '/api/chatlog') {
         response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
-        response.end(JSON.stringify({ ok: true, entries: state.chatLog.slice(-50).reverse() }))
+        response.end(JSON.stringify({ ok: true, entries: state.chatLog.slice(-50) }))
         return
       }
 
@@ -867,6 +950,21 @@ async function startConfigServer(state, configPath, rootDir, getConfig) {
         closeSocket(state, { manual: true })
         response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
         response.end(JSON.stringify({ ok: true, status: state.status }))
+        return
+      }
+
+      if (request.method === 'POST' && pathname === '/api/clear-chat') {
+        try {
+          const result = await clearChatViaCdp()
+          log('chat cleared via CDP:', JSON.stringify(result))
+          response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+          response.end(JSON.stringify({ ok: true, ...result }))
+        }
+        catch (error) {
+          logError('failed to clear chat:', error instanceof Error ? error.message : String(error))
+          response.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' })
+          response.end(JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }))
+        }
         return
       }
 
@@ -1023,7 +1121,7 @@ async function setup(ctx) {
         return { ok: false, error: `not connected to Twitch (${state.status})` }
       }
       enqueueSend(state, channel, message)
-      pushToChatLog(state, 'reply', 'AIRI', message)
+      pushToChatLog(state, 'reply', botName(state), message)
       return { ok: true, channel, queued: true }
     },
   })
@@ -1132,6 +1230,19 @@ export default {
   id: PLUGIN_ID,
   setup,
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

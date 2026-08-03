@@ -46,6 +46,35 @@
     width: 100%; background: #ff5d5d; color: #300; flex: 1;
   }
   .disconnect:hover:not(:disabled) { background: #ff8080; }
+  .clear {
+    width: 100%; margin-top: 10px; padding: 8px 12px;
+    border: 1px solid #8a4a4a; border-radius: 8px;
+    background: transparent; color: #ff9d9d;
+    font-size: 12px; font-weight: 700; cursor: pointer;
+  }
+  .clear:hover:not(:disabled) { background: #2a1a1a; }
+  .overlay {
+    position: fixed; inset: 0; background: rgba(0, 0, 0, 0.62);
+    display: flex; align-items: center; justify-content: center; z-index: 10;
+  }
+  .overlay[hidden] { display: none; }
+  .modal {
+    width: 320px; max-width: 90vw; padding: 16px;
+    background: #1c1c24; border: 1px solid #8a4a4a; border-radius: 10px;
+  }
+  .modal h3 { margin: 0 0 8px; font-size: 14px; font-weight: 700; color: #ff9d9d; }
+  .modal p { margin: 0 0 14px; font-size: 12px; color: #c4c4cc; line-height: 1.5; }
+  .btn-cancel {
+    flex: 1; padding: 8px 10px; border: 0; border-radius: 8px;
+    background: #33333d; color: #fff; font-size: 13px; font-weight: 700; cursor: pointer;
+  }
+  .btn-cancel:hover { background: #40404c; }
+  .btn-danger {
+    flex: 1; padding: 8px 10px; border: 0; border-radius: 8px;
+    background: #ff5d5d; color: #300; font-size: 13px; font-weight: 700; cursor: pointer;
+  }
+  .btn-danger:hover:not(:disabled) { background: #ff8080; }
+  .btn-danger:disabled { opacity: 0.6; cursor: default; }
   .status { display: flex; align-items: center; gap: 6px; font-size: 12px; margin-top: 12px; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: #666; flex: none; }
   .dot.ok { background: #2dd36f; }
@@ -113,6 +142,17 @@
   <div class="row">
     <button class="connect" id="connect">Connect</button>
     <button class="disconnect" id="disconnect">Disconnect</button>
+  </div>
+  <button class="clear" id="clearChat">Clear chat history</button>
+  <div class="overlay" id="clearOverlay" hidden>
+    <div class="modal">
+      <h3>Clear all chat history?</h3>
+      <p>This deletes the current conversation and starts a fresh one: the character will forget everything said so far and reload the current system prompt. This cannot be undone.</p>
+      <div class="row">
+        <button class="btn-cancel" id="clearCancel">Cancel</button>
+        <button class="btn-danger" id="clearConfirm">Yes, clear it</button>
+      </div>
+    </div>
   </div>
   <div class="error" id="error"></div>
   <div class="saved" id="saved"></div>
@@ -199,7 +239,7 @@
           var when = new Date(e.at)
           var time = when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
           html += '<div class="entry' + (e.kind === 'reply' ? ' reply' : '') + (e.kind === 'warn' ? ' warn' : '') + '">'
-            + '<span class="who">' + (e.kind === 'reply' ? 'AIRI →' : e.kind === 'warn' ? '⚠️ AIRI' : escapeHtml(e.user)) + '</span>'
+            + '<span class="who">' + (e.kind === 'reply' ? escapeHtml(e.user) + ' →' : e.kind === 'warn' ? '⚠️ ' + escapeHtml(e.user) : escapeHtml(e.user)) + '</span>'
             + '<span class="when">' + time + '</span><br>'
             + escapeHtml(e.text)
             + '</div>'
@@ -265,6 +305,33 @@
     post('/api/disconnect', null,
       function () { el('saved').textContent = 'Disconnected' },
       function (msg) { el('error').textContent = 'Disconnect failed: ' + msg })
+  })
+
+  el('clearChat').addEventListener('click', function () {
+    el('clearOverlay').hidden = false
+  })
+
+  el('clearCancel').addEventListener('click', function () {
+    el('clearOverlay').hidden = true
+  })
+
+  el('clearConfirm').addEventListener('click', function () {
+    el('clearOverlay').hidden = true
+    el('clearConfirm').disabled = true
+    el('error').textContent = ''
+    el('saved').textContent = ''
+    fetch('/api/clear-chat', { method: 'POST' })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d } }) })
+      .then(function (res) {
+        if (!res.ok) {
+          el('error').textContent = 'Clear failed: ' + (res.data && res.data.error || 'request failed')
+          return
+        }
+        el('saved').textContent = 'Chat cleared — fresh conversation started'
+        refreshChatLog()
+      })
+      .catch(function (e) { el('error').textContent = 'Clear failed: ' + e.message })
+      .finally(function () { el('clearConfirm').disabled = false })
   })
 
   refreshStatus()

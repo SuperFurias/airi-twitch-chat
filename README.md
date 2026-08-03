@@ -17,8 +17,10 @@ AIRI's `extensions/v1` and enable it.
 - **Config widget**: a gamelet widget (auto-opens at startup) with manual
   **Connect** / **Disconnect** buttons, an **Auto-reply to chat** toggle, a
   masked token field, live connection status, a **chat log** showing every
-  received message and posted reply, and a **warning banner** when the
-  character doesn't answer (e.g. no chat model selected in AIRI).
+  received message and posted reply, a **warning banner** when the character
+  doesn't answer (e.g. no chat model selected in AIRI), and a **Clear chat
+  history** button (with a confirmation dialog) that starts a fresh
+  conversation so prompt edits take effect immediately.
 - **Character tools**: `twitch-send-message`, `twitch-get-messages`,
   `twitch-status`, `twitch-open-config` (plus a toolset prompt teaching the
   character to use them).
@@ -91,6 +93,11 @@ one is already saved — it is never sent back to the page).
 - The widget is served by a loopback HTTP server the extension owns
   (`127.0.0.1`, random port) and reads/writes `config.json`; saving new
   credentials disconnects first, and **Connect** applies them.
+- **Clear chat history** drives the AIRI main window through Chrome DevTools
+  Protocol (`--remote-debugging-port=9223`, enabled by the launcher): it
+  creates a fresh session for the active card (reloading the current system
+  prompt) and deletes the old one. Without the debug port the button reports
+  a clear error instead of failing silently.
 
 ## Troubleshooting
 
