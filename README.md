@@ -22,10 +22,11 @@ AIRI's `extensions/v1` and enable it.
   `twitch-status`, `twitch-open-config` (plus a toolset prompt teaching the
   character to use them).
 - **Safety**: bot's own messages are filtered (no reply loops), duplicate IRC
-  deliveries are deduplicated, a cooldown (default 20s) paces triggers,
-  messages are truncated to Twitch's 500-character limit and rate-limited
-  (~20 msgs / 30s), and credentials never leave your machine — the extension
-  is fully local (loopback HTTP server + your own IRC connection).
+  deliveries are deduplicated, a configurable cooldown (default 5s) paces
+  triggers, messages are truncated to Twitch's 500-character limit and
+  rate-limited (~20 msgs / 30s), and credentials never leave your machine —
+  the extension is fully local (loopback HTTP server + your own IRC
+  connection).
 
 ## Install
 
@@ -72,7 +73,7 @@ AIRI's `extensions/v1` and enable it.
 | `oauth` | — | Chat token (`oauth:…`) |
 | `channels` | — | Channels to join, with or without `#` |
 | `autoReply` | `true` | Forward chat to the character and auto-post replies |
-| `replyCooldownMs` | `20000` | Minimum time between forwards |
+| `replyCooldownMs` | `5000` | Minimum time between forwards (configurable in the widget, in seconds) |
 
 All fields can be edited in the widget (the token field only reports whether
 one is already saved — it is never sent back to the page).

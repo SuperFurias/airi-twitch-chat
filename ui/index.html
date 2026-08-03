@@ -92,7 +92,11 @@
     <input type="checkbox" id="autoReply">
     Auto-reply to chat
   </label>
-  <div class="hint">Forwards chat messages to AIRI so the character can respond (one trigger per ~20s, never to its own messages).</div>
+  <div class="hint">Forwards chat messages to AIRI so the character can respond (never to its own messages).</div>
+
+  <label for="cooldown">Reply cooldown (seconds)</label>
+  <input id="cooldown" type="number" min="1" max="300" autocomplete="off" spellcheck="false">
+  <div class="hint">Minimum time between chat triggers. Lower = more responsive, higher = calmer.</div>
 
   <button class="save" id="save">Save</button>
   <div class="row">
@@ -153,6 +157,7 @@
         el('username').value = data.username || ''
         el('channels').value = (data.channels || []).join(', ')
         el('autoReply').checked = data.autoReply !== false
+        el('cooldown').value = Math.round((data.replyCooldownMs || 5000) / 1000)
         oauthSet = Boolean(data.oauthSet)
         el('oauth').placeholder = oauthSet ? 'already set — leave empty to keep' : 'oauth:…'
         el('oauthHint').textContent = oauthSet
@@ -226,6 +231,7 @@
       channels: el('channels').value,
       oauth: el('oauth').value.trim(),
       autoReply: el('autoReply').checked,
+      replyCooldownMs: Math.max(1, Math.min(300, Number(el('cooldown').value) || 5)) * 1000,
     }
     post('/api/config', body,
       function () {

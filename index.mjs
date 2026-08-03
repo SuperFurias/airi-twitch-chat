@@ -184,7 +184,7 @@ function loadConfig(configPath) {
       autoReply: typeof parsed.autoReply === 'boolean' ? parsed.autoReply : true,
       replyCooldownMs: Number.isFinite(Number(parsed.replyCooldownMs)) && Number(parsed.replyCooldownMs) > 0
         ? Number(parsed.replyCooldownMs)
-        : 20_000,
+        : 5_000,
     }
   }
   catch (error) {
@@ -228,7 +228,7 @@ function normalizeConfigInput(input, current) {
     autoReply: typeof record.autoReply === 'boolean' ? record.autoReply : (current?.autoReply ?? true),
     replyCooldownMs: Number.isFinite(Number(record.replyCooldownMs)) && Number(record.replyCooldownMs) > 0
       ? Number(record.replyCooldownMs)
-      : (current?.replyCooldownMs ?? 20_000),
+      : (current?.replyCooldownMs ?? 5_000),
   }
 }
 
@@ -708,7 +708,7 @@ function forwardToCharacter(state, config, entry) {
     return
   }
   state.lastForwardKey = normalized
-  const cooldownMs = config.replyCooldownMs ?? 20_000
+  const cooldownMs = config.replyCooldownMs ?? 5_000
   if (now - state.lastForwardAt < cooldownMs) {
     return
   }
@@ -773,6 +773,7 @@ async function startConfigServer(state, configPath, rootDir, getConfig) {
           channels: current?.channels ?? [],
           oauthSet: Boolean(current?.oauth),
           autoReply: current?.autoReply !== false,
+          replyCooldownMs: current?.replyCooldownMs ?? 5_000,
         }))
         return
       }
@@ -1077,3 +1078,6 @@ export default {
   id: PLUGIN_ID,
   setup,
 }
+
+
+
