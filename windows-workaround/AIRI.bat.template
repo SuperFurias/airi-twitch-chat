@@ -10,8 +10,9 @@ rem 3. <EXTENSION_DIR>       the extension folder under the app userData
 rem 4. <USER_DATA_DIR>       the app userData folder
 rem
 rem Also clears editor-injected env vars that make Electron run as plain Node.
+rem --remote-debugging-port=9223 powers the widget's "Clear chat history" button.
 set "ELECTRON_RUN_AS_NODE="
 set "VSCODE_CWD="
 set "PATH=<NODE_EXE_DIR>;%PATH%"
-start "AIRI" "<AIRI_EXE>" --inspect=9229
+start "AIRI" "<AIRI_EXE>" --inspect=9229 --remote-debugging-port=9223
 start "AIRI loader injector" /min cmd /c "node <USER_DATA_DIR>\airi-loader-injector.mjs <EXTENSION_DIR> <USER_DATA_DIR>"

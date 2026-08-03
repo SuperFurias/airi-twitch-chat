@@ -1,11 +1,25 @@
 # airi-twitch-chat
 
-Connect [AIRI](https://github.com/moeru-ai/airi) to Twitch chat: the character
-reads chat messages, replies to them, and you get a small in-app widget to
-manage the connection.
+Connects [AIRI](https://github.com/moeru-ai/airi) to Twitch chat: the
+character reads chat messages, replies to them, and a small in-app widget
+manages the connection.
 
-Self-contained, zero dependencies, no build step — drop the folder into
-AIRI's `extensions/v1` and enable it.
+> ## ⚠️ READ THIS FIRST — it works only if you follow every step
+>
+> This is **not** a "download and drop into a folder" extension. If you skip
+> a step it will silently not work.
+>
+> **On Windows with the official installed AIRI build, the extension cannot
+> start at all without the launcher fix** — an app bug breaks every
+> extension, not just this one. The launcher is **mandatory**, not optional.
+>
+> | Your setup | What you need |
+> | --- | --- |
+> | Windows, official installed app | **Launcher required** (step 1 below). Without it the extension never starts. |
+> | Linux / macOS, official app | No launcher. Steps 2–6 only. |
+> | Dev build (`stage-tamagotchi`) | No launcher. Steps 2–6 only. |
+>
+> Follow the [Install](#install) section **in order**, every step.
 
 ## Features
 
@@ -33,40 +47,88 @@ AIRI's `extensions/v1` and enable it.
 
 ## Install
 
-1. Copy the whole folder into AIRI's extensions directory:
-   `%APPDATA%\@proj-airi\stage-tamagotchi\extensions\v1\airi-twitch-chat\`
-   (for the installed desktop app the user-data folder may differ — see
-   below).
-2. Create `config.json` next to `index.mjs` (copy `config.example.json`):
+> Do these **in order**. Missing one = broken extension.
 
-   ```json
-   {
-     "username": "your_twitch_username",
-     "oauth": "oauth:your_chat_token",
-     "channels": ["#your_channel"]
-   }
-   ```
+### 1. Windows official builds only: install the launcher (mandatory)
 
-   Get a chat token at <https://twitchtokengenerator.com> (scopes
-   `chat:edit`, `chat:read`, `user:read:chat`). The token only grants chat
-   read/write — never share it, and never commit `config.json` to git.
-3. Enable the extension: create
-   `%APPDATA%\@proj-airi\stage-tamagotchi\extensions-v1.json` with
-   `"enabled": ["airi-twitch-chat"]`, then restart AIRI.
-4. The config widget opens automatically. Press **Connect** — the status dot
-   turns green when joined. Send a message in your channel; the character
-   replies and the reply is posted to chat.
+The official Windows builds of AIRI ship an SDK loader bug
+(`ERR_UNSUPPORTED_ESM_URL_SCHEME` when importing extension entrypoints) that
+prevents **any** extension from starting. The extension **will not run** on
+these builds unless you start AIRI through the launcher provided in
+[`windows-workaround/`](windows-workaround/README.md).
+
+1. Copy the whole extension folder into the installed app's userData:
+   `%APPDATA%\ai.moeru.airi\extensions\v1\airi-twitch-chat\`
+2. Copy `windows-workaround/airi-loader-injector.mjs` to
+   `%APPDATA%\ai.moeru.airi\`
+3. Edit `windows-workaround/AIRI.bat.template`, replacing every
+   `<PLACEHOLDER>` with your paths (airi.exe, a Node 22+ folder, the
+   extension folder, the userData folder), and save it as `AIRI.bat`
+   anywhere convenient.
+4. **Always start AIRI through that bat** — never by double-clicking
+   `airi.exe` directly.
+
+The launcher clears environment variables that break Electron, opens the
+inspector ports the extension relies on, and applies the loader fix without
+modifying the app. See `windows-workaround/README.md` for details.
+
+### 2. Copy the extension folder
+
+Copy the extension folder into AIRI's extensions directory. The exact path
+depends on your setup:
+
+- Official installed app (Windows): `%APPDATA%\ai.moeru.airi\extensions\v1\airi-twitch-chat\`
+- Official app (Linux/macOS): the equivalent userData folder for your platform
+- Dev build: `%APPDATA%\@proj-airi\stage-tamagotchi\extensions\v1\airi-twitch-chat\`
+
+### 3. Create `config.json`
+
+Create `config.json` next to `index.mjs` (copy `config.example.json`):
+
+```json
+{
+  "username": "your_twitch_username",
+  "oauth": "oauth:your_chat_token",
+  "channels": ["#your_channel"]
+}
+```
+
+Get a chat token at <https://twitchtokengenerator.com> (scopes `chat:edit`,
+`chat:read`, `user:read:chat`). The token only grants chat read/write —
+never share it, and never commit `config.json` to git.
+
+### 4. Enable the extension
+
+Create `extensions-v1.json` in the app's userData folder with:
+
+```json
+{
+  "enabled": ["airi-twitch-chat"]
+}
+```
+
+(Optional, for the launcher's reload fallback: add
+`"autoReload": ["airi-twitch-chat"]`.)
+
+### 5. Restart AIRI
+
+Restart AIRI **through the launcher bat** (Windows official builds) or
+normally (other setups). The config widget should open automatically.
+
+### 6. Connect
+
+Press **Connect** in the widget — the status dot turns green when the bot
+joins your channel. Send a message in your channel; the character replies
+and the reply is posted to chat.
 
 ### Requirements
 
 - AIRI with the extension host (`extensions/v1`, manifest v1,
-  `toolKit`/`gameletKit`). At the time of writing that is the `main` branch /
-  0.11.3+ era source.
-- **Windows caveat**: the official Windows builds currently ship an SDK
-  loader bug (`ERR_UNSUPPORTED_ESM_URL_SCHEME` when importing extension
-  entrypoints) that prevents *any* extension from starting — see
-  `windows-workaround/` for a launcher that fixes it without modifying the
-  app. Linux/macOS builds and dev builds are unaffected.
+  `toolKit`/`gameletKit`) — at the time of writing that is the `main`
+  branch / 0.11.3+ era source.
+- Windows official builds: the launcher (step 1) — **mandatory**.
+- Node 22+ available on the machine for the Windows launcher (any platform
+  with an official build is unaffected).
 
 ## Configuration
 
@@ -94,13 +156,17 @@ one is already saved — it is never sent back to the page).
   (`127.0.0.1`, random port) and reads/writes `config.json`; saving new
   credentials disconnects first, and **Connect** applies them.
 - **Clear chat history** drives the AIRI main window through Chrome DevTools
-  Protocol (`--remote-debugging-port=9223`, enabled by the launcher): it
+  Protocol (`--remote-debugging-port=9223`, opened by the launcher): it
   creates a fresh session for the active card (reloading the current system
   prompt) and deletes the old one. Without the debug port the button reports
   a clear error instead of failing silently.
 
 ## Troubleshooting
 
+- **The widget never opens / no extension at all**: on Windows official
+  builds you almost certainly skipped step 1 (the launcher). Start AIRI
+  through the bat and check that `airi-loader-injector.mjs` is in the
+  userData folder.
 - **"Not configured"** in the widget: `config.json` is missing or the token
   is the placeholder — save via the widget.
 - **Reconnect loop**: the extension reconnects with backoff on drops; the
@@ -111,8 +177,8 @@ one is already saved — it is never sent back to the page).
   provider + model (Settings → character model), and that Auto-reply is on.
   The widget shows a warning banner when a forwarded message gets no reply
   within 45s — that almost always means no model is selected.
-- **No extension at all on Windows official builds**: apply
-  `windows-workaround/`.
+- **"Clear chat history" fails**: the app is not running with
+  `--remote-debugging-port=9223` — start it through the launcher bat.
 
 ## License
 
