@@ -1,5 +1,9 @@
 {
   "username": "your_twitch_username",
   "oauth": "oauth:your_chat_token",
-  "channels": ["#your_channel"]
+  "channels": ["#your_channel"],
+  "autoReply": true,
+  "replyCooldownMs": 5000,
+  "replyChance": 1,
+  "mentionWords": ["starry", "sophie"]
 }

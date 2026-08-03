@@ -81,6 +81,58 @@ function parseTags(tagsString) {
   return tags
 }
 
+/** Maps Twitch badge keys to readable role labels. */
+const ROLE_LABELS = {
+  broadcaster: 'broadcaster',
+  moderator: 'moderator',
+  mod: 'moderator',
+  vip: 'vip',
+  subscriber: 'subscriber',
+  founder: 'founder',
+  staff: 'staff',
+  admin: 'admin',
+  global_mod: 'global-mod',
+  artist: 'artist',
+}
+
+/** Extracts role labels from the IRC `badges` tag (e.g. "broadcaster/1,mod/1"). */
+function roleLabels(badgesString) {
+  if (!badgesString) {
+    return []
+  }
+  const roles = []
+  for (const part of String(badgesString).split(',')) {
+    const key = part.split('/')[0].trim().toLowerCase()
+    const label = ROLE_LABELS[key]
+    if (label && !roles.includes(label)) {
+      roles.push(label)
+    }
+  }
+  return roles
+}
+
+/**
+ * The words that count as "calling the bot": configurable via `mentionWords`,
+ * otherwise derived from the bot username ("Starry_Sophie" → starry, sophie).
+ */
+function getMentionWords(config) {
+  if (Array.isArray(config.mentionWords) && config.mentionWords.length > 0) {
+    return config.mentionWords
+      .map(word => String(word).toLowerCase().trim())
+      .filter(word => word.length >= 2)
+  }
+  return String(config.username ?? '')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/i)
+    .filter(part => part.length >= 3)
+}
+
+/** True when the message names the bot ("starry", "@starry_sophie", ...). */
+function mentionsBot(config, text) {
+  const lower = String(text ?? '').toLowerCase()
+  return getMentionWords(config).some(word => lower.includes(word))
+}
+
 /** Parses one IRC PRIVMSG line into a chat entry. */
 function parsePrivmsg(line) {
   const match = line.match(/^@([^\s]+) :[^ ]+ PRIVMSG (#[^ ]+) :(.*)$/)
@@ -94,6 +146,7 @@ function parsePrivmsg(line) {
     user: tags['user-id'] ? tags['user-id'] : tags['display-name'] ?? '',
     displayName: tags['display-name'] ?? '',
     text,
+    roles: roleLabels(tags['badges'] ?? ''),
     isMod: tags['mod'] === '1',
     isSub: tags['subscriber'] === '1',
     color: tags['color'] ?? '',
@@ -156,12 +209,13 @@ function botName(state) {
   return (typeof name === 'string' && name.trim()) ? name.trim() : 'AIRI'
 }
 
-function pushToChatLog(state, kind, user, text) {
+function pushToChatLog(state, kind, user, text, roles) {
   state.chatLog.push({
     kind,
     user,
     text: String(text).slice(0, MAX_MESSAGE_LENGTH),
     at: new Date().toISOString(),
+    roles: Array.isArray(roles) && roles.length > 0 ? roles : undefined,
   })
   if (state.chatLog.length > 100) {
     state.chatLog.splice(0, state.chatLog.length - 100)
@@ -194,6 +248,12 @@ function loadConfig(configPath) {
       replyCooldownMs: Number.isFinite(Number(parsed.replyCooldownMs)) && Number(parsed.replyCooldownMs) > 0
         ? Number(parsed.replyCooldownMs)
         : 5_000,
+      replyChance: Number.isFinite(Number(parsed.replyChance))
+        ? Math.min(1, Math.max(0, Number(parsed.replyChance)))
+        : 1,
+      mentionWords: Array.isArray(parsed.mentionWords)
+        ? parsed.mentionWords.map(word => String(word)).filter(Boolean)
+        : undefined,
     }
   }
   catch (error) {
@@ -238,6 +298,12 @@ function normalizeConfigInput(input, current) {
     replyCooldownMs: Number.isFinite(Number(record.replyCooldownMs)) && Number(record.replyCooldownMs) > 0
       ? Number(record.replyCooldownMs)
       : (current?.replyCooldownMs ?? 5_000),
+    replyChance: Number.isFinite(Number(record.replyChance))
+      ? Math.min(1, Math.max(0, Number(record.replyChance)))
+      : (Number.isFinite(Number(current?.replyChance)) ? current.replyChance : 1),
+    mentionWords: Array.isArray(record.mentionWords)
+      ? record.mentionWords.map(word => String(word)).filter(Boolean)
+      : (current?.mentionWords ?? undefined),
   }
 }
 
@@ -257,6 +323,10 @@ function buildStatusPayload(state, config) {
     buffered: perChannel,
     connectedAt: state.connectedAt,
     autoReply: config?.autoReply !== false,
+    replyCooldownMs: config?.replyCooldownMs ?? 5_000,
+    replyChance: Number.isFinite(Number(config?.replyChance)) ? Math.min(1, Math.max(0, Number(config.replyChance))) : 1,
+    lastForwardAt: state.lastForwardAt,
+    mentionWords: config?.mentionWords ?? undefined,
     bridge: state.bridgeReady,
     modelWarning: state.modelWarning,
     lastOutputAt: state.lastOutputAt,
@@ -442,7 +512,10 @@ function connect(state, config) {
       if (line.startsWith('ERROR')) {
         logError('twitch error:', line)
       }
-      handleLine(state, config, line)
+      // NOTE: use the LIVE config (state.config), not the connect-time
+      // closure — a saved cooldown/credentials change must take effect on
+      // the next message even before a manual reconnect.
+      handleLine(state, state.config, line)
     }
   })
 
@@ -489,7 +562,7 @@ function handleLine(state, config, line) {
     const entry = parsePrivmsg(line)
     if (entry) {
       pushToBuffer(state, entry)
-      pushToChatLog(state, 'chat', entry.displayName || entry.user, entry.text)
+      pushToChatLog(state, 'chat', entry.displayName || entry.user, entry.text, entry.roles)
       forwardToCharacter(state, config, entry)
     }
     return
@@ -716,8 +789,12 @@ function handleBridgeMessage(state, message) {
       || (message.data.message && message.data.message.text)
       || message.data.text
       || ''
+    // The character may decline a message by replying exactly "SKIP": the
+    // answer is not posted to Twitch (and not shown as a reply in the log).
+    const cleanReply = typeof replyText === 'string' ? replyText.trim() : ''
     if (
-      typeof replyText === 'string' && replyText.trim()
+      cleanReply
+      && cleanReply.toUpperCase() !== 'SKIP'
       && state.connected
       && state.config && state.config.autoReply !== false
       && Date.now() - state.lastForwardAt < 30_000
@@ -725,7 +802,7 @@ function handleBridgeMessage(state, message) {
       if (state.pendingReplyTimer) {
         clearTimeout(state.pendingReplyTimer)
       }
-      state.pendingReplyText = replyText.trim()
+      state.pendingReplyText = cleanReply
       state.pendingReplyTimer = setTimeout(() => {
         state.pendingReplyTimer = undefined
         const channel = state.config && state.config.channels[0]
@@ -838,6 +915,18 @@ function forwardToCharacter(state, config, entry) {
   if (ownName && String(entry.displayName || '').toLowerCase() === ownName) {
     return
   }
+  // Model-driven selection: EVERY message is forwarded so the character can
+  // judge it with full context and decide what deserves an answer — replies
+  // of exactly "SKIP" are dropped by the auto-post gate. Messages that name
+  // the bot always pass through; the rest are forwarded with probability
+  // `replyChance` (default 100%) and paced by `replyCooldownMs` so AIRI is
+  // not flooded in fast chats.
+  const mentioned = mentionsBot(config, entry.text)
+  const rawChance = Number(config.replyChance)
+  const replyChance = Number.isFinite(rawChance) ? Math.min(1, Math.max(0, rawChance)) : 1
+  if (!mentioned && Math.random() > replyChance) {
+    return
+  }
   const now = Date.now()
   const normalized = `${entry.displayName}:${entry.text}`
   if (normalized === state.lastForwardKey && now - state.lastForwardAt < 5_000) {
@@ -845,11 +934,12 @@ function forwardToCharacter(state, config, entry) {
   }
   state.lastForwardKey = normalized
   const cooldownMs = config.replyCooldownMs ?? 5_000
-  if (now - state.lastForwardAt < cooldownMs) {
+  if (!mentioned && now - state.lastForwardAt < cooldownMs) {
     return
   }
   state.lastForwardAt = now
-  const text = `[Twitch] ${entry.displayName || entry.user}: ${entry.text}`
+  const roleTag = entry.roles && entry.roles.length ? `[${entry.roles.join('][')}] ` : ''
+  const text = `[Twitch]${roleTag}${entry.displayName || entry.user}: ${entry.text}`
   if (state.bridgeWs && state.bridgeWs.readyState === WebSocket.OPEN) {
     // NOTICE: input:text defaults to consumer-group delivery, and the server
     // excludes the SENDER from consumer selection — so an event sent through
@@ -911,6 +1001,8 @@ async function startConfigServer(state, configPath, rootDir, getConfig) {
           oauthSet: Boolean(current?.oauth),
           autoReply: current?.autoReply !== false,
           replyCooldownMs: current?.replyCooldownMs ?? 5_000,
+          replyChance: Number.isFinite(Number(current?.replyChance)) ? Math.min(1, Math.max(0, Number(current.replyChance))) : 1,
+          mentionWords: current?.mentionWords ?? undefined,
         }))
         return
       }
@@ -1004,6 +1096,22 @@ async function setup(ctx) {
 
   // Watch the plugin folder for config.json changes. Saving new credentials
   // while connected disconnects first (no auto-reconnect); Connect applies.
+  const applyConfigChange = () => {
+    const nextConfig = loadConfig(configPath)
+    if (JSON.stringify(nextConfig) !== JSON.stringify(config)) {
+      config = nextConfig
+      state.config = config
+      log('config.json changed')
+      if (state.ws || state.connected || state.reconnectTimer) {
+        closeSocket(state, { manual: true })
+        log('disconnected — press Connect to apply the new credentials')
+      }
+      else {
+        state.status = configIsValid(config) ? 'disconnected' : 'missing-config'
+        state.lastError = configIsValid(config) ? '' : 'config.json is missing or incomplete'
+      }
+    }
+  }
   let folderWatcher
   try {
     folderWatcher = watch(rootDir, { persistent: false }, (eventType, filename) => {
@@ -1015,26 +1123,17 @@ async function setup(ctx) {
       }
       state.configWatchTimer = setTimeout(() => {
         state.configWatchTimer = undefined
-        const nextConfig = loadConfig(configPath)
-        if (JSON.stringify(nextConfig) !== JSON.stringify(config)) {
-          config = nextConfig
-          state.config = config
-          log('config.json changed')
-          if (state.ws || state.connected || state.reconnectTimer) {
-            closeSocket(state, { manual: true })
-            log('disconnected — press Connect to apply the new credentials')
-          }
-          else {
-            state.status = configIsValid(config) ? 'disconnected' : 'missing-config'
-            state.lastError = configIsValid(config) ? '' : 'config.json is missing or incomplete'
-          }
-        }
+        applyConfigChange()
       }, 200)
     })
   }
   catch (error) {
     logError('failed to watch config.json:', error instanceof Error ? error.message : String(error))
   }
+  // Fallback polling: fs.watch is unreliable on some Windows setups, and a
+  // stale cooldown would silently break the pacing gate — a periodic check
+  // guarantees every edit is picked up even if the watcher misses it.
+  const configPollTimer = setInterval(applyConfigChange, 5_000)
 
   // Configuration widget: loopback HTTP server serving the plugin's own UI.
   // The gamelet iframe uses `src` directly (the host passes arbitrary URLs
@@ -1214,6 +1313,7 @@ async function setup(ctx) {
       if (folderWatcher) {
         folderWatcher.close()
       }
+      clearInterval(configPollTimer)
       if (state.configServer) {
         try {
           state.configServer.close()
@@ -1230,6 +1330,18 @@ export default {
   id: PLUGIN_ID,
   setup,
 }
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

@@ -38,6 +38,17 @@ manages the connection.
 - **Character tools**: `twitch-send-message`, `twitch-get-messages`,
   `twitch-status`, `twitch-open-config` (plus a toolset prompt teaching the
   character to use them).
+- **Model-driven selection**: the character receives every chat message and
+  decides itself which ones deserve an answer (it may decline with `SKIP`,
+  which is never posted to Twitch). Messages that name the bot
+  (configurable `mentionWords`, default derived from the bot's username)
+  always pass through immediately. `replyChance` (default 100%, adjustable in
+  the widget's settings) additionally filters non-mention messages before
+  they reach the character — lower values make the bot pickier.
+- **Role awareness**: Twitch badges (broadcaster, moderator, VIP, subscriber,
+  founder, staff…) are parsed from the IRC tags and shown to the character
+  in brackets (`[Twitch][moderator] name: message`) plus in the widget's
+  chat log, so it knows how to talk to specific people.
 - **Safety**: bot's own messages are filtered (no reply loops), duplicate IRC
   deliveries are deduplicated, a configurable cooldown (default 5s) paces
   triggers, messages are truncated to Twitch's 500-character limit and
@@ -138,7 +149,9 @@ and the reply is posted to chat.
 | `oauth` | — | Chat token (`oauth:…`) |
 | `channels` | — | Channels to join, with or without `#` |
 | `autoReply` | `true` | Forward chat to the character and auto-post replies |
-| `replyCooldownMs` | `5000` | Minimum time between forwards (configurable in the widget, in seconds) |
+| `replyCooldownMs` | `5000` | Minimum gap between messages sent to the character (widget: "Message pacing"). Mentions always pass through immediately |
+| `replyChance` | `1` | Probability (0–1) of forwarding a message that doesn't mention the bot (widget: "Reply chance %"). `1` = the character decides on every message |
+| `mentionWords` | from `username` | Words that count as calling the bot ("starry", "@starry_sophie"…) — messages containing one are always forwarded |
 
 All fields can be edited in the widget (the token field only reports whether
 one is already saved — it is never sent back to the page).

@@ -16,6 +16,13 @@
   }
   h1 { font-size: 15px; margin: 0 0 4px; font-weight: 600; }
   .sub { font-size: 12px; color: #9a9aa5; margin: 0 0 14px; }
+  .head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .cog {
+    border: 0; background: transparent; color: #7c7c88;
+    font-size: 16px; line-height: 1; padding: 4px 6px; cursor: pointer;
+    border-radius: 6px;
+  }
+  .cog:hover { color: #e7e7ea; background: #23232c; }
   label { display: block; font-size: 12px; font-weight: 600; margin: 10px 0 4px; color: #c4c4cc; }
   input {
     width: 100%; padding: 8px 10px; border-radius: 8px;
@@ -38,6 +45,11 @@
     width: 100%; background: #33333d; color: #fff;
   }
   .save:hover:not(:disabled) { background: #40404c; }
+  .back {
+    width: 100%; background: transparent; color: #c4c4cc;
+    border: 1px solid #33333d;
+  }
+  .back:hover { background: #23232c; }
   .connect {
     width: 100%; background: #2dd36f; color: #062; flex: 1;
   }
@@ -96,6 +108,7 @@
   }
   .chatlog .entry { margin-bottom: 6px; word-break: break-word; }
   .chatlog .entry .who { font-weight: 700; color: #a78bfa; }
+  .chatlog .entry .roles { color: #6f6f7d; font-weight: 600; margin-right: 4px; }
   .chatlog .entry.reply .who { color: #2dd36f; }
   .chatlog .entry.warn .who { color: #ffb86c; }
   .chatlog .entry .when { color: #5c5c68; font-size: 10px; margin-left: 6px; }
@@ -103,63 +116,83 @@
 </style>
 </head>
 <body>
-  <h1>Twitch Chat</h1>
-  <p class="sub">AIRI ↔ Twitch connection settings</p>
-
-  <div class="status">
-    <span class="dot" id="dot"></span>
-    <span id="statusText">Loading…</span>
+  <div class="head">
+    <div>
+      <h1>Twitch Chat</h1>
+      <p class="sub">AIRI ↔ Twitch connection</p>
+    </div>
+    <button class="cog" id="openSettings" title="Settings">⚙</button>
   </div>
 
-  <div class="warnbanner" id="warn" hidden>
-    ⚠️ AIRI didn't respond to the last chat messages. Make sure a model is
-    selected in AIRI (Settings → character model), then send a new message.
-  </div>
+  <div id="viewMain">
+    <div class="status">
+      <span class="dot" id="dot"></span>
+      <span id="statusText">Loading…</span>
+    </div>
 
-  <label for="username">Twitch username</label>
-  <input id="username" autocomplete="off" spellcheck="false" placeholder="your_twitch_username">
-  <div class="hint">The account that sends chat messages.</div>
+    <div class="warnbanner" id="warn" hidden>
+      ⚠️ AIRI didn't respond to the last chat messages. Make sure a model is
+      selected in AIRI (Settings → character model), then send a new message.
+    </div>
 
-  <label for="oauth">Chat token (oauth:…)</label>
-  <input id="oauth" type="password" autocomplete="off" spellcheck="false" placeholder="oauth:…">
-  <div class="hint" id="oauthHint">Get one at twitchtokengenerator.com (scopes: chat:edit, chat:read, user:read:chat).</div>
-
-  <label for="channels">Channels</label>
-  <input id="channels" autocomplete="off" spellcheck="false" placeholder="#channel1, #channel2">
-  <div class="hint">Comma-separated, with or without #.</div>
-
-  <label class="check">
-    <input type="checkbox" id="autoReply">
-    Auto-reply to chat
-  </label>
-  <div class="hint">Forwards chat messages to AIRI so the character can respond (never to its own messages).</div>
-
-  <label for="cooldown">Reply cooldown (seconds)</label>
-  <input id="cooldown" type="number" min="1" max="300" autocomplete="off" spellcheck="false">
-  <div class="hint">Minimum time between chat triggers. Lower = more responsive, higher = calmer.</div>
-
-  <button class="save" id="save">Save</button>
-  <div class="row">
-    <button class="connect" id="connect">Connect</button>
-    <button class="disconnect" id="disconnect">Disconnect</button>
-  </div>
-  <button class="clear" id="clearChat">Clear chat history</button>
-  <div class="overlay" id="clearOverlay" hidden>
-    <div class="modal">
-      <h3>Clear all chat history?</h3>
-      <p>This deletes the current conversation and starts a fresh one: the character will forget everything said so far and reload the current system prompt. This cannot be undone.</p>
-      <div class="row">
-        <button class="btn-cancel" id="clearCancel">Cancel</button>
-        <button class="btn-danger" id="clearConfirm">Yes, clear it</button>
+    <div class="row">
+      <button class="connect" id="connect">Connect</button>
+      <button class="disconnect" id="disconnect">Disconnect</button>
+    </div>
+    <button class="clear" id="clearChat">Clear chat history</button>
+    <div class="overlay" id="clearOverlay" hidden>
+      <div class="modal">
+        <h3>Clear all chat history?</h3>
+        <p>This deletes the current conversation and starts a fresh one: the character will forget everything said so far and reload the current system prompt. This cannot be undone.</p>
+        <div class="row">
+          <button class="btn-cancel" id="clearCancel">Cancel</button>
+          <button class="btn-danger" id="clearConfirm">Yes, clear it</button>
+        </div>
       </div>
     </div>
+
+    <h2 class="log-title">Chat log</h2>
+    <div class="chatlog" id="chatlog"><div class="log-empty">No messages yet.</div></div>
   </div>
+
+  <div id="viewSettings" hidden>
+    <label for="username">Twitch username</label>
+    <input id="username" autocomplete="off" spellcheck="false" placeholder="your_twitch_username">
+    <div class="hint">The account that sends chat messages.</div>
+
+    <label for="oauth">Chat token (oauth:…)</label>
+    <input id="oauth" type="password" autocomplete="off" spellcheck="false" placeholder="oauth:…">
+    <div class="hint" id="oauthHint">Get one at twitchtokengenerator.com (scopes: chat:edit, chat:read, user:read:chat).</div>
+
+    <label for="channels">Channels</label>
+    <input id="channels" autocomplete="off" spellcheck="false" placeholder="#channel1, #channel2">
+    <div class="hint">Comma-separated, with or without #.</div>
+
+    <label class="check">
+      <input type="checkbox" id="autoReply">
+      Auto-reply to chat
+    </label>
+    <div class="hint">Forwards chat messages to AIRI so the character can respond (never to its own messages).</div>
+
+    <label for="cooldown">Message pacing (seconds)</label>
+    <input id="cooldown" type="number" min="1" max="300" autocomplete="off" spellcheck="false">
+    <div class="hint">Minimum gap between messages sent to the character. Mentions always pass through immediately.</div>
+
+    <label for="chance">Reply chance (%)</label>
+    <input id="chance" type="number" min="0" max="100" autocomplete="off" spellcheck="false">
+    <div class="hint">Chance to answer a message that doesn't mention the bot. 100 = the character sees (and decides on) every message. Lower = pickier.</div>
+
+    <label for="mentions">Mention words</label>
+    <input id="mentions" autocomplete="off" spellcheck="false" placeholder="starry, sophie">
+    <div class="hint">Messages containing one of these are always forwarded. Empty = derived from the username.</div>
+
+    <button class="save" id="save">Save settings</button>
+    <button class="back" id="back">← Back</button>
+  </div>
+
   <div class="error" id="error"></div>
   <div class="saved" id="saved"></div>
   <div class="meta" id="meta"></div>
-
-  <h2 class="log-title">Chat log</h2>
-  <div class="chatlog" id="chatlog"><div class="log-empty">No messages yet.</div></div>
 
 <script>
 (function () {
@@ -167,6 +200,11 @@
   var busy = false
 
   function el(id) { return document.getElementById(id) }
+
+  function showView(name) {
+    el('viewMain').hidden = name !== 'main'
+    el('viewSettings').hidden = name !== 'settings'
+  }
 
   function setStatus(state) {
     var dot = el('dot')
@@ -210,6 +248,8 @@
         el('channels').value = (data.channels || []).join(', ')
         el('autoReply').checked = data.autoReply !== false
         el('cooldown').value = Math.round((data.replyCooldownMs || 5000) / 1000)
+        el('chance').value = Math.round((typeof data.replyChance === 'number' ? data.replyChance : 1) * 100)
+        el('mentions').value = (data.mentionWords || []).join(', ')
         oauthSet = Boolean(data.oauthSet)
         el('oauth').placeholder = oauthSet ? 'already set — leave empty to keep' : 'oauth:…'
         el('oauthHint').textContent = oauthSet
@@ -239,6 +279,7 @@
           var when = new Date(e.at)
           var time = when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
           html += '<div class="entry' + (e.kind === 'reply' ? ' reply' : '') + (e.kind === 'warn' ? ' warn' : '') + '">'
+            + (e.roles && e.roles.length ? '<span class="roles">[' + e.roles.join('][') + ']</span>' : '')
             + '<span class="who">' + (e.kind === 'reply' ? escapeHtml(e.user) + ' →' : e.kind === 'warn' ? '⚠️ ' + escapeHtml(e.user) : escapeHtml(e.user)) + '</span>'
             + '<span class="when">' + time + '</span><br>'
             + escapeHtml(e.text)
@@ -277,6 +318,15 @@
       .finally(function () { busy = false; setStatus(null); setTimeout(refreshStatus, 800) })
   }
 
+  el('openSettings').addEventListener('click', function () {
+    loadConfig().catch(function () { el('error').textContent = 'Failed to load settings' })
+    showView('settings')
+  })
+
+  el('back').addEventListener('click', function () {
+    showView('main')
+  })
+
   el('save').addEventListener('click', function () {
     var body = {
       username: el('username').value.trim(),
@@ -284,6 +334,8 @@
       oauth: el('oauth').value.trim(),
       autoReply: el('autoReply').checked,
       replyCooldownMs: Math.max(1, Math.min(300, Number(el('cooldown').value) || 5)) * 1000,
+      replyChance: Math.max(0, Math.min(100, Number(el('chance').value) || 100)) / 100,
+      mentionWords: el('mentions').value.split(',').map(function (w) { return w.trim() }).filter(Boolean),
     }
     post('/api/config', body,
       function () {
@@ -334,8 +386,8 @@
       .finally(function () { el('clearConfirm').disabled = false })
   })
 
+  showView('main')
   refreshStatus()
-  loadConfig()
   refreshChatLog()
   setInterval(refreshStatus, 2000)
   setInterval(refreshChatLog, 2000)
