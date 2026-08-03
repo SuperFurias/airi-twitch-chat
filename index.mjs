@@ -125,6 +125,7 @@ function createTwitchState() {
     bridgeHeartbeatTimer: undefined,
     lastForwardAt: 0,
     lastForwardKey: '',
+    lastAutoSendAt: 0,
     pendingReplyTimer: undefined,
     pendingReplyText: '',
     stagePeers: [],
