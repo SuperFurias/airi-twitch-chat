@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Twitch Chat</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+    background: rgba(15, 15, 20, 0.92);
+    color: #e7e7ea;
+    padding: 16px;
+  }
+  h1 { font-size: 15px; margin: 0 0 4px; font-weight: 600; }
+  .sub { font-size: 12px; color: #9a9aa5; margin: 0 0 14px; }
+  label { display: block; font-size: 12px; font-weight: 600; margin: 10px 0 4px; color: #c4c4cc; }
+  input {
+    width: 100%; padding: 8px 10px; border-radius: 8px;
+    border: 1px solid #33333d; background: #1c1c24; color: #e7e7ea;
+    font-size: 13px; outline: none;
+  }
+  input:focus { border-color: #9146ff; }
+  input::placeholder { color: #5c5c68; }
+  .hint { font-size: 11px; color: #7c7c88; margin-top: 3px; }
+  .check { display: flex; align-items: center; gap: 8px; font-size: 13px; margin-top: 14px; color: #e7e7ea; cursor: pointer; }
+  .check input { width: auto; accent-color: #9146ff; }
+  .row { display: flex; gap: 8px; }
+  .row > div { flex: 1; }
+  button {
+    margin-top: 14px; padding: 9px 12px; border: 0;
+    border-radius: 8px; font-size: 13px; font-weight: 700; cursor: pointer;
+  }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .save {
+    width: 100%; background: #33333d; color: #fff;
+  }
+  .save:hover:not(:disabled) { background: #40404c; }
+  .connect {
+    width: 100%; background: #2dd36f; color: #062; flex: 1;
+  }
+  .connect:hover:not(:disabled) { background: #45e083; }
+  .disconnect {
+    width: 100%; background: #ff5d5d; color: #300; flex: 1;
+  }
+  .disconnect:hover:not(:disabled) { background: #ff8080; }
+  .status { display: flex; align-items: center; gap: 6px; font-size: 12px; margin-top: 12px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #666; flex: none; }
+  .dot.ok { background: #2dd36f; }
+  .dot.bad { background: #ff5d5d; }
+  .meta { font-size: 11px; color: #8a8a96; margin-top: 6px; line-height: 1.5; }
+  .error { color: #ff9d9d; font-size: 12px; margin-top: 10px; min-height: 16px; }
+  .saved { color: #7ee2a8; font-size: 12px; margin-top: 10px; min-height: 16px; }
+  code { background: #23232c; padding: 1px 5px; border-radius: 4px; font-size: 11px; }
+  .log-title { font-size: 13px; margin: 18px 0 6px; font-weight: 600; color: #c4c4cc; }
+  .chatlog {
+    max-height: 220px; overflow-y: auto; background: #14141a;
+    border: 1px solid #2a2a33; border-radius: 8px; padding: 8px 10px;
+    font-size: 12px; line-height: 1.55;
+  }
+  .chatlog .entry { margin-bottom: 6px; word-break: break-word; }
+  .chatlog .entry .who { font-weight: 700; color: #a78bfa; }
+  .chatlog .entry.reply .who { color: #2dd36f; }
+  .chatlog .entry .when { color: #5c5c68; font-size: 10px; margin-left: 6px; }
+  .chatlog .log-empty { color: #5c5c68; }
+</style>
+</head>
+<body>
+  <h1>Twitch Chat</h1>
+  <p class="sub">AIRI ↔ Twitch connection settings</p>
+
+  <div class="status">
+    <span class="dot" id="dot"></span>
+    <span id="statusText">Loading…</span>
+  </div>
+
+  <label for="username">Twitch username</label>
+  <input id="username" autocomplete="off" spellcheck="false" placeholder="your_twitch_username">
+  <div class="hint">The account that sends chat messages.</div>
+
+  <label for="oauth">Chat token (oauth:…)</label>
+  <input id="oauth" type="password" autocomplete="off" spellcheck="false" placeholder="oauth:…">
+  <div class="hint" id="oauthHint">Get one at twitchtokengenerator.com (scopes: chat:read, chat:write).</div>
+
+  <label for="channels">Channels</label>
+  <input id="channels" autocomplete="off" spellcheck="false" placeholder="#channel1, #channel2">
+  <div class="hint">Comma-separated, with or without #.</div>
+
+  <label class="check">
+    <input type="checkbox" id="autoReply">
+    Auto-reply to chat
+  </label>
+  <div class="hint">Forwards chat messages to AIRI so the character can respond (one trigger per ~20s, never to its own messages).</div>
+
+  <button class="save" id="save">Save</button>
+  <div class="row">
+    <button class="connect" id="connect">Connect</button>
+    <button class="disconnect" id="disconnect">Disconnect</button>
+  </div>
+  <div class="error" id="error"></div>
+  <div class="saved" id="saved"></div>
+  <div class="meta" id="meta"></div>
+
+  <h2 class="log-title">Chat log</h2>
+  <div class="chatlog" id="chatlog"><div class="log-empty">No messages yet.</div></div>
+
+<script>
+(function () {
+  var oauthSet = false
+  var busy = false
+
+  function el(id) { return document.getElementById(id) }
+
+  function setStatus(state) {
+    var dot = el('dot')
+    var ok = state === 'connected'
+    dot.className = 'dot ' + (ok ? 'ok' : state === 'connecting' || state === 'reconnecting' ? '' : 'bad')
+    var label = state === 'connected' ? 'Connected'
+      : state === 'connecting' ? 'Connecting…'
+      : state === 'reconnecting' ? 'Reconnecting…'
+      : state === 'disconnected' ? 'Disconnected'
+      : state === 'missing-config' ? 'Not configured'
+      : (state || 'Offline')
+    el('statusText').textContent = label
+    el('connect').disabled = busy || ok || state === 'connecting' || state === 'reconnecting'
+    el('disconnect').disabled = busy || !ok
+  }
+
+  function refreshStatus() {
+    fetch('/api/status', { cache: 'no-store' })
+      .then(function (r) { return r.json() })
+      .then(function (data) {
+        setStatus(data.status)
+        var meta = []
+        if (data.channels && data.channels.length) meta.push('channels: ' + data.channels.join(', '))
+        if (data.joinedChannels && data.joinedChannels.length) meta.push('joined: ' + data.joinedChannels.join(', '))
+        if (data.sentCount) meta.push('sent: ' + data.sentCount)
+        if (data.buffered) {
+          Object.keys(data.buffered).forEach(function (k) { meta.push(k + ': ' + data.buffered[k] + ' msgs') })
+        }
+        if (data.lastError) meta.push('last error: ' + data.lastError)
+        el('meta').textContent = meta.join(' · ')
+      })
+      .catch(function () { setStatus('offline') })
+  }
+
+  function loadConfig() {
+    return fetch('/api/config', { cache: 'no-store' })
+      .then(function (r) { return r.json() })
+      .then(function (data) {
+        el('username').value = data.username || ''
+        el('channels').value = (data.channels || []).join(', ')
+        el('autoReply').checked = data.autoReply !== false
+        oauthSet = Boolean(data.oauthSet)
+        el('oauth').placeholder = oauthSet ? 'already set — leave empty to keep' : 'oauth:…'
+        el('oauthHint').textContent = oauthSet
+          ? 'A token is already saved. Enter a new one to replace it.'
+          : 'Get one at twitchtokengenerator.com (scopes: chat:read, chat:write).'
+      })
+  }
+
+  var lastLogSignature = ''
+
+  function refreshChatLog() {
+    fetch('/api/chatlog', { cache: 'no-store' })
+      .then(function (r) { return r.json() })
+      .then(function (data) {
+        var entries = data.entries || []
+        var signature = entries.map(function (e) { return e.at + ':' + e.text.length }).join('|')
+        if (signature === lastLogSignature) return
+        lastLogSignature = signature
+        var box = el('chatlog')
+        if (entries.length === 0) {
+          box.innerHTML = '<div class="log-empty">No messages yet.</div>'
+          return
+        }
+        var html = ''
+        for (var i = 0; i < entries.length; i++) {
+          var e = entries[i]
+          var when = new Date(e.at)
+          var time = when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          html += '<div class="entry' + (e.kind === 'reply' ? ' reply' : '') + '">'
+            + '<span class="who">' + (e.kind === 'reply' ? 'AIRI →' : escapeHtml(e.user)) + '</span>'
+            + '<span class="when">' + time + '</span><br>'
+            + escapeHtml(e.text)
+            + '</div>'
+        }
+        box.innerHTML = html
+        box.scrollTop = box.scrollHeight
+      })
+      .catch(function () {})
+  }
+
+  function escapeHtml(value) {
+    return String(value)
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+  }
+
+  function post(path, body, onOk, onErr) {
+    busy = true
+    el('error').textContent = ''
+    el('saved').textContent = ''
+    setStatus(null)
+    fetch(path, {
+      method: 'POST',
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d } }) })
+      .then(function (res) {
+        if (!res.ok) { if (onErr) onErr(res.data && res.data.error || 'Request failed'); return }
+        if (onOk) onOk(res.data)
+      })
+      .catch(function (e) { if (onErr) onErr('Request failed: ' + e.message) })
+      .finally(function () { busy = false; setStatus(null); setTimeout(refreshStatus, 800) })
+  }
+
+  el('save').addEventListener('click', function () {
+    var body = {
+      username: el('username').value.trim(),
+      channels: el('channels').value,
+      oauth: el('oauth').value.trim(),
+      autoReply: el('autoReply').checked,
+    }
+    post('/api/config', body,
+      function () {
+        el('saved').textContent = 'Saved — press Connect to apply'
+        el('oauth').value = ''
+        oauthSet = true
+        el('oauth').placeholder = 'already set — leave empty to keep'
+      },
+      function (msg) { el('error').textContent = msg })
+  })
+
+  el('connect').addEventListener('click', function () {
+    post('/api/connect', null,
+      function () { el('saved').textContent = 'Connecting…' },
+      function (msg) { el('error').textContent = 'Connect failed: ' + msg })
+  })
+
+  el('disconnect').addEventListener('click', function () {
+    post('/api/disconnect', null,
+      function () { el('saved').textContent = 'Disconnected' },
+      function (msg) { el('error').textContent = 'Disconnect failed: ' + msg })
+  })
+
+  refreshStatus()
+  loadConfig()
+  refreshChatLog()
+  setInterval(refreshStatus, 2000)
+  setInterval(refreshChatLog, 2000)
+})()
+</script>
+</body>
+</html>

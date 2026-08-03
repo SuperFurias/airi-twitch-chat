@@ -1,0 +1,5 @@
+# Credentials — never commit your real token.
+config.json
+
+# Runtime debug artifacts.
+bridge-debug.log

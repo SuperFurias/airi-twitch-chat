@@ -1,0 +1,5 @@
+{
+  "username": "your_twitch_username",
+  "oauth": "oauth:your_chat_token",
+  "channels": ["#your_channel"]
+}
