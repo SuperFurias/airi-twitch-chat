@@ -26,11 +26,11 @@ import { fileURLToPath } from 'node:url'
 
 const PLUGIN_ID = 'airi-twitch-chat'
 const TWITCH_IRC_URL = 'wss://irc-ws.chat.twitch.tv:443'
-const MAX_BUFFERED_MESSAGES = 100
 const MIN_SEND_INTERVAL_MS = 1_600
 const MAX_RECONNECT_DELAY_MS = 60_000
 const MAX_MESSAGE_LENGTH = 500
 const MODEL_RESPONSE_WINDOW_MS = 45_000
+const DEFAULT_CHAT_LOG_LIMIT = 200
 
 /**
  * Local kit references for `ctx.kits.use(...)`.
@@ -185,6 +185,7 @@ function createTwitchState() {
     stagePeers: [],
     ingestTargets: [],
     chatLog: [],
+    chatLogLimit: DEFAULT_CHAT_LOG_LIMIT,
     config: undefined,
     lastOutputAt: 0,
     modelWarning: false,
@@ -199,8 +200,9 @@ function pushToBuffer(state, entry) {
     state.buffers.set(entry.channel, messages)
   }
   messages.push(entry)
-  if (messages.length > MAX_BUFFERED_MESSAGES) {
-    messages.splice(0, messages.length - MAX_BUFFERED_MESSAGES)
+  const limit = state.chatLogLimit ?? DEFAULT_CHAT_LOG_LIMIT
+  if (messages.length > limit) {
+    messages.splice(0, messages.length - limit)
   }
 }
 
@@ -217,8 +219,9 @@ function pushToChatLog(state, kind, user, text, roles) {
     at: new Date().toISOString(),
     roles: Array.isArray(roles) && roles.length > 0 ? roles : undefined,
   })
-  if (state.chatLog.length > 100) {
-    state.chatLog.splice(0, state.chatLog.length - 100)
+  const limit = state.chatLogLimit ?? DEFAULT_CHAT_LOG_LIMIT
+  if (state.chatLog.length > limit) {
+    state.chatLog.splice(0, state.chatLog.length - limit)
   }
 }
 
@@ -251,6 +254,9 @@ function loadConfig(configPath) {
       replyChance: Number.isFinite(Number(parsed.replyChance))
         ? Math.min(1, Math.max(0, Number(parsed.replyChance)))
         : 1,
+      chatLogLimit: Number.isFinite(Number(parsed.chatLogLimit)) && Number(parsed.chatLogLimit) > 0
+        ? Math.floor(Number(parsed.chatLogLimit))
+        : DEFAULT_CHAT_LOG_LIMIT,
       mentionWords: Array.isArray(parsed.mentionWords)
         ? parsed.mentionWords.map(word => String(word)).filter(Boolean)
         : undefined,
@@ -301,6 +307,9 @@ function normalizeConfigInput(input, current) {
     replyChance: Number.isFinite(Number(record.replyChance))
       ? Math.min(1, Math.max(0, Number(record.replyChance)))
       : (Number.isFinite(Number(current?.replyChance)) ? current.replyChance : 1),
+    chatLogLimit: Number.isFinite(Number(record.chatLogLimit)) && Number(record.chatLogLimit) > 0
+      ? Math.floor(Number(record.chatLogLimit))
+      : (Number.isFinite(Number(current?.chatLogLimit)) && current.chatLogLimit > 0 ? current.chatLogLimit : DEFAULT_CHAT_LOG_LIMIT),
     mentionWords: Array.isArray(record.mentionWords)
       ? record.mentionWords.map(word => String(word)).filter(Boolean)
       : (current?.mentionWords ?? undefined),
@@ -325,6 +334,7 @@ function buildStatusPayload(state, config) {
     autoReply: config?.autoReply !== false,
     replyCooldownMs: config?.replyCooldownMs ?? 5_000,
     replyChance: Number.isFinite(Number(config?.replyChance)) ? Math.min(1, Math.max(0, Number(config.replyChance))) : 1,
+    chatLogLimit: Number.isFinite(Number(config?.chatLogLimit)) && config.chatLogLimit > 0 ? Math.floor(config.chatLogLimit) : DEFAULT_CHAT_LOG_LIMIT,
     lastForwardAt: state.lastForwardAt,
     mentionWords: config?.mentionWords ?? undefined,
     bridge: state.bridgeReady,
@@ -1002,6 +1012,7 @@ async function startConfigServer(state, configPath, rootDir, getConfig) {
           autoReply: current?.autoReply !== false,
           replyCooldownMs: current?.replyCooldownMs ?? 5_000,
           replyChance: Number.isFinite(Number(current?.replyChance)) ? Math.min(1, Math.max(0, Number(current.replyChance))) : 1,
+          chatLogLimit: Number.isFinite(Number(current?.chatLogLimit)) && current.chatLogLimit > 0 ? Math.floor(current.chatLogLimit) : DEFAULT_CHAT_LOG_LIMIT,
           mentionWords: current?.mentionWords ?? undefined,
         }))
         return
@@ -1009,7 +1020,7 @@ async function startConfigServer(state, configPath, rootDir, getConfig) {
 
       if (request.method === 'GET' && pathname === '/api/chatlog') {
         response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
-        response.end(JSON.stringify({ ok: true, entries: state.chatLog.slice(-50) }))
+        response.end(JSON.stringify({ ok: true, entries: state.chatLog.slice(-(state.chatLogLimit ?? DEFAULT_CHAT_LOG_LIMIT)) }))
         return
       }
 
@@ -1087,6 +1098,7 @@ async function setup(ctx) {
   const state = createTwitchState()
   let config = loadConfig(configPath)
   state.config = config
+  state.chatLogLimit = (config && config.chatLogLimit) || DEFAULT_CHAT_LOG_LIMIT
 
   state.status = configIsValid(config) ? 'disconnected' : 'missing-config'
   state.lastError = configIsValid(config) ? '' : 'config.json is missing or incomplete'
@@ -1101,6 +1113,7 @@ async function setup(ctx) {
     if (JSON.stringify(nextConfig) !== JSON.stringify(config)) {
       config = nextConfig
       state.config = config
+      state.chatLogLimit = (config && config.chatLogLimit) || DEFAULT_CHAT_LOG_LIMIT
       log('config.json changed')
       if (state.ws || state.connected || state.reconnectTimer) {
         closeSocket(state, { manual: true })
@@ -1330,3 +1343,5 @@ export default {
   id: PLUGIN_ID,
   setup,
 }
+
+

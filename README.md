@@ -151,6 +151,7 @@ and the reply is posted to chat.
 | `autoReply` | `true` | Forward chat to the character and auto-post replies |
 | `replyCooldownMs` | `5000` | Minimum gap between messages sent to the character (widget: "Message pacing"). Mentions always pass through immediately |
 | `replyChance` | `1` | Probability (0–1) of forwarding a message that doesn't mention the bot (widget: "Reply chance %"). `1` = the character decides on every message |
+| `chatLogLimit` | `200` | How many messages the chat log keeps and shows in the widget (widget: "Chat log size") |
 | `mentionWords` | from `username` | Words that count as calling the bot ("starry", "@starry_sophie"…) — messages containing one are always forwarded |
 
 All fields can be edited in the widget (the token field only reports whether

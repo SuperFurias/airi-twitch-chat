@@ -182,6 +182,10 @@
     <input id="chance" type="number" min="0" max="100" autocomplete="off" spellcheck="false">
     <div class="hint">Chance to answer a message that doesn't mention the bot. 100 = the character sees (and decides on) every message. Lower = pickier.</div>
 
+    <label for="logsize">Chat log size (messages)</label>
+    <input id="logsize" type="number" min="10" max="1000" autocomplete="off" spellcheck="false">
+    <div class="hint">How many messages the chat log keeps in memory and shows in the widget.</div>
+
     <label for="mentions">Mention words</label>
     <input id="mentions" autocomplete="off" spellcheck="false" placeholder="starry, sophie">
     <div class="hint">Messages containing one of these are always forwarded. Empty = derived from the username.</div>
@@ -249,6 +253,7 @@
         el('autoReply').checked = data.autoReply !== false
         el('cooldown').value = Math.round((data.replyCooldownMs || 5000) / 1000)
         el('chance').value = Math.round((typeof data.replyChance === 'number' ? data.replyChance : 1) * 100)
+        el('logsize').value = data.chatLogLimit || 200
         el('mentions').value = (data.mentionWords || []).join(', ')
         oauthSet = Boolean(data.oauthSet)
         el('oauth').placeholder = oauthSet ? 'already set — leave empty to keep' : 'oauth:…'
@@ -335,6 +340,7 @@
       autoReply: el('autoReply').checked,
       replyCooldownMs: Math.max(1, Math.min(300, Number(el('cooldown').value) || 5)) * 1000,
       replyChance: Math.max(0, Math.min(100, Number(el('chance').value) || 100)) / 100,
+      chatLogLimit: Math.max(10, Math.min(1000, Number(el('logsize').value) || 200)),
       mentionWords: el('mentions').value.split(',').map(function (w) { return w.trim() }).filter(Boolean),
     }
     post('/api/config', body,
